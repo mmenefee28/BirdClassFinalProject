@@ -1,0 +1,318 @@
+## IMPORTING LIBRARIES
+
+import tensorflow as tf
+from tensorflow.keras import backend as K
+from tensorflow.keras import backend, models, layers, optimizers, regularizers
+from tensorflow.keras.layers import Input, Concatenate, Dense, Dropout, Flatten, Activation
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, AveragePooling2D, SeparableConv2D
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import BatchNormalization
+from tensorflow.keras.callbacks import EarlyStopping
+
+from tensorflow.keras.utils import to_categorical
+from sklearn.model_selection import train_test_split
+from IPython.display import display  # Library to help view images
+from PIL import Image
+from tensorflow.keras.preprocessing.image import ImageDataGenerator  # Library for data augmentation
+import os, shutil 
+
+import numpy as np
+from google.colab import drive
+import matplotlib.pyplot as plt
+import pandas as pd
+from tensorflow.keras.applications import MobileNetV2
+
+## Mounting Gdrive
+drive.mount('/content/gdrive')
+base_dir = '/content/gdrive/My Drive/100_bird_species'
+
+## Creating Training and Test sets
+
+train_dir = os.path.join(base_dir, 'train')
+validation_dir = os.path.join(base_dir, 'valid')
+test_dir = os.path.join(base_dir, 'test')
+birdtypes = os.listdir(train_dir)
+
+## Using ImageDataGenerator to expand data set
+train_datagen = ImageDataGenerator(rescale=1. / 255)
+test_datagen = ImageDataGenerator(rescale=1. / 255
+
+train_data = train_datagen.flow_from_directory(
+    train_dir,  
+    target_size=(224, 224),
+    batch_size=64,  
+    class_mode= 'categorical')  
+
+validation_data = train_datagen.flow_from_directory(
+    validation_dir,
+    target_size=(224, 224),
+    batch_size=32,
+    class_mode='categorical')
+
+test_data = test_datagen.flow_from_directory(
+    test_dir,
+    target_size=(224, 224),
+    batch_size=32,
+    class_mode='categorical')
+
+print('train_data_group', len(train_data)) # might be good to determine steps_per_epoch
+print('valid_data_group', len(validation_data)) # help determine Validation steps
+print('test_data_group', len(test_data))
+
+## Creating first model
+backend.clear_session()
+
+model = models.Sequential()
+model.add(layers.Conv2D(32, (3 ,3), padding='same', activation ='relu', input_shape=(224, 224, 3)))
+model.add(layers.MaxPool2D((2, 2)))
+model.add(BatchNormalization())
+
+model.add(layers.Conv2D(32, (3,3), activation ='relu'))
+model.add(layers.MaxPool2D((2, 2)))
+model.add(BatchNormalization())
+
+model.add(layers.Conv2D(32, (3,3), padding='same', activation ='relu'))
+model.add(layers.MaxPool2D((2, 2)))
+model.add(BatchNormalization())
+
+model.add(layers.Conv2D(64, (3 ,3), activation ='relu'))
+model.add(layers.MaxPool2D((2, 2)))
+model.add(BatchNormalization())
+
+model.add(layers.Conv2D(64, (3,3), padding='same', activation ='relu'))
+model.add(layers.MaxPool2D((2, 2)))
+model.add(BatchNormalization())
+
+model.add(layers.Conv2D(64, (3,3), padding='same', activation ='relu'))
+model.add(BatchNormalization())
+
+model.add(layers.Flatten())
+model.add(layers.Dense(256, activation ='relu'))
+model.add(BatchNormalization())
+model.add(layers.Dropout(0.5))
+model.add(layers.Dense(len(birdtypes), activation='softmax'))
+
+model.summary()
+
+## Running first model
+model.compile (optimizer='adam',
+               loss='categorical_crossentropy',
+               metrics=['accuracy'])
+
+history = model.fit_generator(train_data,
+                    epochs = 50,
+                    steps_per_epoch = 396,
+                    validation_steps= 29,
+                    validation_data = (validation_data),
+                    verbose = 1,
+                    callbacks=[EarlyStopping(monitor='val_accuracy', patience=5, restore_best_weights=True)])
+
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+epochs = range(1, len(loss) +1)
+
+plt.plot(epochs, loss, 'bo', label='Training loss')
+plt.plot(epochs, val_loss, 'b', label='Validation loss')
+plt.title('Training and Validation loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+
+plt.show()
+
+accuracy = history.history['accuracy']
+val_accuracy = history.history['val_accuracy']
+
+plt.plot(epochs, accuracy, 'bo', label='Training accuracy')
+plt.plot(epochs, val_accuracy, 'b', label='Validation accuracy')
+plt.title('Training and validation accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+
+plt.show()
+
+test_loss, test_acc = model.evaluate_generator(test_data, steps=29)
+
+print('model_test_acc:', test_acc)
+print('Doesnt seem to work as well')
+
+## Completing Transfer Learning using MobileNetV2
+
+backend.clear_session()
+mobmodel = MobileNetV2(weights='imagenet',
+                         include_top=False,
+                         input_shape=(224, 224, 3))
+
+for layer in mobmodel.layers[:-4]:
+    layer.trainable = False
+for layer in mobmodel.layers:
+    print(layer, layer.trainable)
+
+
+model = models.Sequential()
+model.add(mobmodel)
+model.add(layers.Conv2D(64, kernel_size=3, activation ='relu'))
+model.add(BatchNormalization())
+
+model.add(layers.Conv2D(64, kernel_size=3, activation ='relu'))
+model.add(BatchNormalization())
+
+model.add(layers.Conv2D(64, kernel_size=3, activation ='relu'))
+model.add(BatchNormalization())
+
+model.add(layers.Flatten())
+model.add(layers.Dense(512, activation ='relu'))
+model.add(layers.Dense(len(birdtypes), activation='softmax'))
+
+model.compile (optimizer='adam',
+               loss='categorical_crossentropy',
+               metrics=['accuracy'])
+
+history = model.fit_generator(train_data,
+                    epochs = 20,
+                    steps_per_epoch = 50,
+                    validation_steps= 25,
+                    validation_data = (validation_data),
+                    verbose = 1,
+                    callbacks=[EarlyStopping(monitor='val_accuracy', patience=5, restore_best_weights=True)])
+
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+epochs = range(1, len(loss) +1)
+
+plt.plot(epochs, loss, 'bo', label='Training loss')
+plt.plot(epochs, val_loss, 'b', label='Validation loss')
+plt.title('Training and Validation loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+
+plt.show()
+
+accuracy = history.history['accuracy']
+val_accuracy = history.history['val_accuracy']
+
+plt.plot(epochs, accuracy, 'bo', label='Training accuracy')
+plt.plot(epochs, val_accuracy, 'b', label='Validation accuracy')
+plt.title('Training and validation accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+
+plt.show()
+
+test_loss, test_acc = model.evaluate_generator(test_data, steps=25)
+
+print('model_test_acc:', test_acc)
+print('Doesnt seem to work as well')
+
+## Model 3
+backend.clear_session()
+
+#Visible layer
+vislayer = Input(shape=(224,224,3))
+
+#conv1
+conv11 = SeparableConv2D(64, 3, padding='same', activation='relu')(vislayer)
+conv12 = SeparableConv2D(128, 3,strides=2, padding='same', activation='relu')(conv11)
+conv13 = MaxPooling2D((2,2), padding='same')(conv12)
+
+#Conv2
+conv21 = SeparableConv2D(64, 3, padding='same', activation='relu')(vislayer)
+conv22 = SeparableConv2D(128, 3, padding='same', activation='relu', strides=2)(conv21)
+conv23 = MaxPooling2D((2,2), padding='same')(conv22)
+
+#Conv3
+conv31 = SeparableConv2D(64, 3, activation='relu', padding='same')(vislayer)
+conv32 = SeparableConv2D(128, 3,activation='relu', padding='same', strides=2)(conv31)
+conv33 = MaxPooling2D((2,2), padding='same')(conv32)
+
+#Conv4
+conv42 = SeparableConv2D(64, 3, padding='same', activation='relu')(vislayer)
+conv43 = SeparableConv2D(128, 3, padding='same', activation='relu', strides=2)(conv42)
+conv44 = MaxPooling2D((2,2), padding='same')(conv43)
+
+merged = Concatenate(axis=-1)([conv13, conv23, conv33, conv44])
+lvl2norm = BatchNormalization()(merged)
+
+#conv5
+conv51 = SeparableConv2D(64, 3, padding='same', activation='relu')(lvl2norm)
+conv52 = SeparableConv2D(128, 3,strides=2, padding='same', activation='relu')(conv51)
+conv53 = MaxPooling2D((2,2), padding='same')(conv52)
+
+#Conv6
+conv61 = SeparableConv2D(64, 3, padding='same', activation='relu')(lvl2norm)
+conv62 = SeparableConv2D(128, 3, padding='same', activation='relu', strides=2)(conv61)
+conv63 = MaxPooling2D((2,2), padding='same')(conv62)
+
+#Conv7
+conv71 = SeparableConv2D(64, 3, activation='relu', padding='same')(lvl2norm)
+conv72 = SeparableConv2D(128, 3,activation='relu', padding='same', strides=2)(conv71)
+conv73 = MaxPooling2D((2,2), padding='same')(conv72)
+
+#Conv8
+conv82 = SeparableConv2D(64, 3, padding='same', activation='relu')(lvl2norm)
+conv83 = SeparableConv2D(128, 3, padding='same', activation='relu', strides=2)(conv82)
+conv84 = MaxPooling2D((2,2), padding='same')(conv83)
+
+#concat
+merged2 = Concatenate(axis=-1)([conv53, conv63, conv73, conv84])
+
+
+#bnorm = BatchNormalization()(merged)
+conv5 = Conv2D(64, 1, padding='same', activation='relu')(merged2)
+conv6 = Conv2D(128, 3, padding='same', activation='relu')(conv5)
+bnorm2 = BatchNormalization()(conv6)
+flat = Flatten()(bnorm2)
+hidden = Dense(64, activation='relu')(flat)
+drop = Dropout(0.5)(hidden)
+output = Dense(185, activation='softmax')(drop)
+
+#Model
+model2 = Model(inputs=vislayer, outputs=output)
+
+model2.compile (optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+               loss='categorical_crossentropy',
+               metrics=['accuracy'])
+
+history = model2.fit_generator(train_data,
+                    epochs = 40,
+                    steps_per_epoch = 100,
+                    validation_steps= 50,
+                    validation_data = (validation_data),
+                    verbose = 1,
+                    callbacks=[EarlyStopping(monitor='val_accuracy', patience=5, restore_best_weights=True)])
+
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+epochs = range(1, len(loss) +1)
+
+plt.plot(epochs, loss, 'bo', label='Training loss')
+plt.plot(epochs, val_loss, 'b', label='Validation loss')
+plt.title('Training and Validation loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+
+plt.show()
+
+accuracy = history.history['accuracy']
+val_accuracy = history.history['val_accuracy']
+
+plt.plot(epochs, accuracy, 'bo', label='Training accuracy')
+plt.plot(epochs, val_accuracy, 'b', label='Validation accuracy')
+plt.title('Training and validation accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.legend()
+
+plt.show()
+
+test_loss, test_acc = model2.evaluate_generator(test_data, steps=50)
+
+print('model_test_acc:', test_acc)
+print('Doesnt seem to work as well')
